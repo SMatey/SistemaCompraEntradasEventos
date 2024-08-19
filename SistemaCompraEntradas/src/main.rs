@@ -23,7 +23,7 @@ struct Categoria {
 }   
 //-------------------------------------------------
 struct Estadio {
-    categorias: Categoria,
+    categorias: HashMap<String, Categoria>,
 }
 
 fn main() {
