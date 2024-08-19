@@ -18,14 +18,14 @@ struct  Zona {
 }
 //-------------------------------------------------
 struct Categoria {
-    nombre: String,
+    nombre: String,         //POSIBLES NOMBRES -> 1.Tribuna Norte, 2. Tribuna Sur, 3.Platea Lateral Este, 4.Platea Lateral Oeste 
     zonas: HashMap<String, Zona>,
 }   
 //-------------------------------------------------
 struct Estadio {
     categorias: HashMap<String, Categoria>,
 }
-
+//-------------------------------------------------
 fn main() {
     print!("Codigo Realizado Con Exito");
 }
