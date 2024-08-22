@@ -1,5 +1,4 @@
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use std::io;
 
@@ -9,14 +8,26 @@ async fn main() -> io::Result<()> {
     let (reader, mut writer) = stream.split();
     let mut buf_reader = BufReader::new(reader);
 
-    let message = "Hello from client!";
-    writer.write_all(message.as_bytes()).await?;
-
-    // Read the response from the server
+    // Leer y mostrar el menú del servidor línea por línea
     let mut buffer = String::new();
-    buf_reader.read_to_string(&mut buffer).await?;
+    while buf_reader.read_line(&mut buffer).await? > 0 {
+        print!("{}", buffer);
+        buffer.clear();  // Limpiar buffer para la siguiente línea
+    }
 
-    println!("Received from server: {}", buffer);
+    // Ahora enviar una opción al servidor
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    writer.write_all(input.as_bytes()).await?;
+
+    // Leer y mostrar la respuesta del servidor
+    let mut response = String::new();
+    while buf_reader.read_line(&mut response).await? > 0 {
+        print!("{}", response);
+        response.clear();  // Limpiar buffer para la siguiente línea
+    }
 
     Ok(())
 }
+
+
