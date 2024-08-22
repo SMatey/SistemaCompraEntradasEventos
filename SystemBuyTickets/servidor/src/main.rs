@@ -14,18 +14,18 @@ struct Silla {
 //-------------------------------------------------
 struct  Zona {
     nombre: String,
-    filas: HashMap<u32, Vec<Silla>>
+    filas: Vec<Silla>
 }
 //-------------------------------------------------
 struct Categoria {
     nombre: String,         //POSIBLES NOMBRES -> 1.Tribuna Norte, 2. Tribuna Sur, 3.Platea Lateral Este, 4.Platea Lateral Oeste 
-    zonas: HashMap<String, Zona>,
+    zonas: Vec<Zona>,
 }   
 //-------------------------------------------------
 struct Estadio {
-    categorias: HashMap<String, Categoria>,
+    categorias: Vec<Categoria>,
 }
-//-------------------------------------------------
+//=========================================CREATED OF NECESSARY FUNCTIONS=========================================
 fn main() {
     print!("Codigo Realizado Con Exito");
 }
