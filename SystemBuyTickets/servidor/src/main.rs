@@ -157,6 +157,7 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
         let estadio_guard = estadio.lock().await;
         let menu = crear_menu(&*estadio_guard).await;
 
+        // Enviar el menú al cliente
         if let Err(e) = writer.write_all(menu.as_bytes()).await {
             eprintln!("Error al enviar el menú: {:?}", e);
             return;
@@ -170,6 +171,8 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
         match buf_reader.read_line(&mut buffer).await {
             Ok(bytes_read) if bytes_read > 0 => {
                 let opcion = buffer.trim();
+                println!("Opción ingresada: {}", opcion); // Diagnóstico
+
                 if opcion.eq_ignore_ascii_case("0") {
                     let msg = "Conexión terminada.\n";
                     if let Err(e) = writer.write_all(msg.as_bytes()).await {
@@ -181,21 +184,20 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
                     break;
                 }
 
-                // Mostrar el valor ingresado para diagnóstico
-                println!("Opción ingresada: {}", opcion);
-
                 let categoria_index = opcion.parse::<usize>().ok();
                 match categoria_index {
                     Some(index) if index > 0 && index <= estadio_guard.categorias.len() => {
                         let categoria = &estadio_guard.categorias[index - 1];
                         println!("Categoría seleccionada: {}", categoria.nombre); // Diagnóstico
 
+                        // Llamada a la función para buscar asientos
                         let resultado = estadio_guard.buscar_mejores_asientos_2(categoria.nombre.clone(), None, 4);
                         let response = match resultado {
                             Some(asientos) => format!("Asientos encontrados: {:?}\n", asientos),
                             None => "No se encontraron asientos disponibles\n".to_string(),
                         };
 
+                        // Enviar la respuesta al cliente
                         if let Err(e) = writer.write_all(response.as_bytes()).await {
                             eprintln!("Error al enviar la respuesta: {:?}", e);
                             break;
