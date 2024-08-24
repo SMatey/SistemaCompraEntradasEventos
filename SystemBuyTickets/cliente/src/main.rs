@@ -1,33 +1,44 @@
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
-use std::io;
+use std::error::Error;
+use tokio::io::stdin;
 
 #[tokio::main]
-async fn main() -> io::Result<()> {
-    let mut stream = TcpStream::connect("127.0.0.1:7878").await?;
-    let (reader, mut writer) = stream.split();
-    let mut buf_reader = BufReader::new(reader);
+async fn main() -> Result<(), Box<dyn Error>> {
+    loop {
+        // Establece la conexión con el servidor
+        let mut stream = TcpStream::connect("127.0.0.1:7878").await?;
 
-    // Leer y mostrar el menú del servidor línea por línea
-    let mut buffer = String::new();
-    while buf_reader.read_line(&mut buffer).await? > 0 {
-        print!("{}", buffer);
-        buffer.clear();  // Limpiar buffer para la siguiente línea
-    }
+        let mut buffer = [0; 1024];
+        let stdin = stdin();
+        let mut reader = BufReader::new(stdin);
 
-    // Ahora enviar una opción al servidor
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    writer.write_all(input.as_bytes()).await?;
+        // Limpiar la pantalla (solo en Windows, si usas otro sistema operativo, ajusta esto)
+        std::process::Command::new("cmd").args(&["/c", "cls"]).status()?;
 
-    // Leer y mostrar la respuesta del servidor
-    let mut response = String::new();
-    while buf_reader.read_line(&mut response).await? > 0 {
-        print!("{}", response);
-        response.clear();  // Limpiar buffer para la siguiente línea
+        // Leer la respuesta del servidor
+        let bytes_read = stream.read(&mut buffer).await?;
+        let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
+        print!("{}", responses);
+
+        // Leer entrada del usuario
+        print!("-> ");
+        let mut input = String::new();
+        reader.read_line(&mut input).await?;
+
+        let entrada = input.trim().to_string(); // Asegúrate de que la entrada sea un String
+
+        // Verificar si el usuario ingresó '0' para salir
+        if entrada == "0" {
+            println!("Saliendo del sistema...");
+            break;
+        }
+
+        // Enviar la entrada al servidor
+        stream.write_all(entrada.as_bytes()).await?;
+        stream.flush().await?;
     }
 
     Ok(())
 }
-
-

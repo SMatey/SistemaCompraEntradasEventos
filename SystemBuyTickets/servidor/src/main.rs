@@ -1,10 +1,9 @@
 use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 
-//=========================================CREACIÓN DE ESTRUCTURAS NECESARIAS=========================================
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EstadoSilla {
     Disponible,
@@ -35,7 +34,6 @@ struct Estadio {
     categorias: Vec<Categoria>,
 }
 
-//=========================================FUNCIONES NECESARIAS=========================================
 async fn inicializar_mapeo() -> Estadio {
     let mut categorias = Vec::new();
 
@@ -143,43 +141,71 @@ async fn crear_menu(estadio: &Estadio) -> String {
         }
     }
     menu.push_str("-----------------------\n");
-    menu.push_str("Ingrese su opción: ");
+    menu.push_str("Ingrese '0' para salir");
     menu
 }
 
-async fn manejar_cliente(stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
+async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
     let (reader, mut writer) = io::split(stream);
-    let mut buf_reader = io::BufReader::new(reader);
+    let mut buf_reader = BufReader::new(reader);
     let mut buffer = String::new();
 
-    let estadio = estadio.lock().await; // Obtén el `MutexGuard` aquí
-    let menu = crear_menu(&*estadio).await; // Desreferencia el `MutexGuard`
-    if let Err(e) = writer.write_all(menu.as_bytes()).await {
-        eprintln!("Error al enviar el menú: {:?}", e);
-        return;
-    }
+    let estadio = estadio.lock().await;
+    let menu = crear_menu(&*estadio).await;
 
-    buffer.clear(); // Limpia el buffer para la siguiente lectura
-    match buf_reader.read_line(&mut buffer).await {
-        Ok(bytes_read) if bytes_read > 0 => {
-            let opcion: Result<usize, _> = buffer.trim().parse();
-            let response = match opcion {
-                Ok(valor) => {
-                    if valor > 0 && valor <= estadio.categorias.len() {
-                        format!("Opción {} seleccionada", valor)
-                    } else {
-                        "Opción inválida".to_string()
+    loop {
+        // Enviar el menú al cliente
+        if let Err(e) = writer.write_all(menu.as_bytes()).await {
+            eprintln!("Error al enviar el menú: {:?}", e);
+            return;
+        }
+        if let Err(e) = writer.flush().await {
+            eprintln!("Error al hacer flush: {:?}", e);
+            return;
+        }
+
+        // Leer la opción del cliente
+        buffer.clear();
+        match buf_reader.read_line(&mut buffer).await {
+            Ok(bytes_read) if bytes_read > 0 => {
+                let opcion = buffer.trim();
+                if opcion.eq_ignore_ascii_case("salir") {
+                    let msg = "Conexión terminada.\n";
+                    if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                        eprintln!("Error al enviar mensaje de terminación: {:?}", e);
                     }
+                    if let Err(e) = writer.flush().await {
+                        eprintln!("Error al hacer flush: {:?}", e);
+                    }
+                    break;
                 }
-                Err(_) => "Error al interpretar la opción".to_string(),
-            };
 
-            if let Err(e) = writer.write_all(response.as_bytes()).await {
-                eprintln!("Error al enviar la respuesta: {:?}", e);
+                let response = match opcion.parse::<usize>() {
+                    Ok(valor) => {
+                        if valor > 0 && valor <= estadio.categorias.len() {
+                            format!("Opción {} seleccionada\n", valor)
+                        } else {
+                            "Opción inválida\n".to_string()
+                        }
+                    }
+                    Err(_) => "Error al interpretar la opción\n".to_string(),
+                };
+
+                if let Err(e) = writer.write_all(response.as_bytes()).await {
+                    eprintln!("Error al enviar la respuesta: {:?}", e);
+                    break;
+                }
+                if let Err(e) = writer.flush().await {
+                    eprintln!("Error al hacer flush: {:?}", e);
+                    break;
+                }
+            }
+            Ok(_) => eprintln!("No se recibió ningún dato"),
+            Err(e) => {
+                eprintln!("Error al leer del cliente: {:?}", e);
+                break;
             }
         }
-        Ok(_) => eprintln!("No se recibió ningún dato"),
-        Err(e) => eprintln!("Error al leer del cliente: {:?}", e),
     }
 }
 
