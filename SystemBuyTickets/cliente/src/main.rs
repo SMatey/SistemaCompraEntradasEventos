@@ -23,16 +23,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         io::stdout().flush().await?;
         let mut input = String::new();
         reader.read_line(&mut input).await?;
-        let opcion = input.trim();
+        let opcion = input.trim().to_string(); // Trim and convert to String
 
         // Enviar la opción al servidor
-        stream.write_all(opcion.as_bytes()).await?;
-        stream.flush().await?;
+        if !opcion.is_empty() {
+            println!("Enviando opción: {}", opcion); // Debugging
+            stream.write_all(opcion.as_bytes()).await?;
+            stream.flush().await?;
+        }
 
         // Leer la respuesta del servidor después de elegir categoría
         let bytes_read = stream.read(&mut buffer).await?;
         let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
-        print!("{}", responses);
+        println!("Respuesta del servidor: {}", responses); // Debugging
 
         if opcion == "0" {
             println!("Conexión terminada.");
@@ -52,13 +55,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Enviar la cantidad al servidor
-        stream.write_all(input.trim().as_bytes()).await?;
+        println!("Enviando cantidad: {}", cantidad); // Debugging
+        stream.write_all(cantidad.to_string().as_bytes()).await?;
         stream.flush().await?;
 
         // Leer la respuesta final del servidor
         let bytes_read = stream.read(&mut buffer).await?;
         let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
-        print!("{}", responses);
+        println!("Respuesta del servidor: {}", responses); // Debugging
     }
 
     Ok(())

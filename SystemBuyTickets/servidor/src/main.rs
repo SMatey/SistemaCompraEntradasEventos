@@ -178,7 +178,7 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
         match buf_reader.read_line(&mut buffer).await {
             Ok(bytes_read) if bytes_read > 0 => {
                 let opcion = buffer.trim();
-                println!("Opción ingresada: {}", opcion); // Diagnóstico
+                println!("Opción ingresada: {}", opcion); // Debugging
 
                 if opcion.eq_ignore_ascii_case("0") {
                     let msg = "Conexión terminada.\n";
@@ -191,17 +191,14 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
                     break;
                 }
 
-                if let Ok(categoria_index) = opcion.parse::<usize>() {
-                    if categoria_index > 0 && categoria_index <= estadio_guard.categorias.len() {
-                        let categoria = &estadio_guard.categorias[categoria_index - 1];
-                        let max_boletos = 10; // Definir el máximo de boletos permitidos
-                        let categoria_nombre = categoria.nombre.clone();
-
-                        // Solicitar la cantidad de asientos
-                        buffer.clear();
-                        let msg = format!("Selecciona la cantidad de asientos (máximo {}):\n", max_boletos);
+                let categoria_index = opcion.parse::<usize>().ok();
+                if let Some(index) = categoria_index {
+                    let categoria = &estadio_guard.categorias.get(index - 1);
+                    if let Some(categoria) = categoria {
+                        // Enviar confirmación de categoría
+                        let msg = format!("Categoría seleccionada: {}\n", categoria.nombre);
                         if let Err(e) = writer.write_all(msg.as_bytes()).await {
-                            eprintln!("Error al enviar mensaje de cantidad de asientos: {:?}", e);
+                            eprintln!("Error al enviar confirmación de categoría: {:?}", e);
                             break;
                         }
                         if let Err(e) = writer.flush().await {
@@ -209,56 +206,56 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
                             break;
                         }
 
+                        // Leer la cantidad de asientos
+                        buffer.clear();
                         match buf_reader.read_line(&mut buffer).await {
                             Ok(bytes_read) if bytes_read > 0 => {
-                                let cantidad = buffer.trim().parse::<u32>();
-                                match cantidad {
-                                    Ok(cantidad) if cantidad > 0 && cantidad <= max_boletos => {
-                                        // Llamada a la función para buscar asientos
-                                        let resultado = estadio_guard.buscar_mejores_asientos_2(categoria_nombre, cantidad, max_boletos);
-                                        let response = match resultado {
-                                            Some(asientos) => format!("Asientos encontrados: {:?}\n", asientos),
-                                            None => "No se encontraron asientos disponibles\n".to_string(),
-                                        };
+                                let cantidad = buffer.trim().parse::<u32>().unwrap_or(0);
+                                let max_boletos = 6; // Definir límite máximo de boletos
 
-                                        // Enviar la respuesta al cliente
-                                        if let Err(e) = writer.write_all(response.as_bytes()).await {
-                                            eprintln!("Error al enviar la respuesta: {:?}", e);
-                                            break;
-                                        }
-                                        if let Err(e) = writer.flush().await {
-                                            eprintln!("Error al hacer flush: {:?}", e);
-                                            break;
-                                        }
+                                if cantidad > max_boletos {
+                                    let msg = "La cantidad solicitada excede el límite máximo de boletos.\n";
+                                    if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                                        eprintln!("Error al enviar mensaje de límite excedido: {:?}", e);
                                     }
-                                    _ => {
-                                        let msg = format!("Cantidad inválida. Debe ser entre 1 y {}.\n", max_boletos);
-                                        if let Err(e) = writer.write_all(msg.as_bytes()).await {
-                                            eprintln!("Error al enviar mensaje de cantidad inválida: {:?}", e);
-                                        }
-                                        if let Err(e) = writer.flush().await {
-                                            eprintln!("Error al hacer flush: {:?}", e);
-                                        }
+                                    if let Err(e) = writer.flush().await {
+                                        eprintln!("Error al hacer flush: {:?}", e);
+                                    }
+                                } else {
+                                    let resultado = estadio_guard.buscar_mejores_asientos_2(categoria.nombre.clone(), cantidad, max_boletos);
+                                    let response = match resultado {
+                                        Some(asientos) => format!("Asientos encontrados: {:?}\n", asientos),
+                                        None => "No se encontraron asientos disponibles\n".to_string(),
+                                    };
+
+                                    // Enviar la respuesta al cliente
+                                    if let Err(e) = writer.write_all(response.as_bytes()).await {
+                                        eprintln!("Error al enviar la respuesta: {:?}", e);
+                                        break;
+                                    }
+                                    if let Err(e) = writer.flush().await {
+                                        eprintln!("Error al hacer flush: {:?}", e);
+                                        break;
                                     }
                                 }
                             }
-                            Ok(_) => eprintln!("No se recibió ningún dato para la cantidad de asientos"),
+                            Ok(_) => eprintln!("No se recibió ningún dato para la cantidad"),
                             Err(e) => {
                                 eprintln!("Error al leer la cantidad de asientos: {:?}", e);
                                 break;
                             }
                         }
                     } else {
-                        let msg = "Opción de categoría inválida\n";
+                        let msg = "Categoría no válida.\n";
                         if let Err(e) = writer.write_all(msg.as_bytes()).await {
-                            eprintln!("Error al enviar mensaje de opción inválida: {:?}", e);
+                            eprintln!("Error al enviar mensaje de categoría no válida: {:?}", e);
                         }
                         if let Err(e) = writer.flush().await {
                             eprintln!("Error al hacer flush: {:?}", e);
                         }
                     }
                 } else {
-                    let msg = "Opción inválida\n";
+                    let msg = "Opción inválida.\n";
                     if let Err(e) = writer.write_all(msg.as_bytes()).await {
                         eprintln!("Error al enviar mensaje de opción inválida: {:?}", e);
                     }
@@ -275,6 +272,7 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
         }
     }
 }
+
 
 //-------------MAIN PRINCIPAL
 #[tokio::main]
