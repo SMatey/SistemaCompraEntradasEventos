@@ -7,34 +7,41 @@ use std::collections::HashMap;
 
 //-------------CREACION DE LAS ESTRUCTURAS NECESARIAS
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EstadoSilla {
+pub enum EstadoSilla {
     Disponible,
     Reservada,
     Comprada,
 }
 
 #[derive(Debug, Clone)]
-struct Silla {
-    numero: u32,
-    estado: EstadoSilla,
+pub struct Silla {
+    pub numero: u32,
+    pub estado: EstadoSilla,
 }
 
 #[derive(Debug, Clone)]
-struct Zona {
-    nombre: String,
-    filas: HashMap<u32, Vec<Silla>>,
+pub struct Fila {
+    pub numero: u32,
+    pub asientos: Vec<Silla>,
 }
 
 #[derive(Debug, Clone)]
-struct Categoria {
-    nombre: String,
-    zonas: Vec<Zona>,
+pub struct Zona {
+    pub nombre: String,
+    pub filas: HashMap<u32, Fila>,
 }
 
 #[derive(Debug, Clone)]
-struct Estadio {
-    categorias: Vec<Categoria>,
+pub struct Categoria {
+    pub nombre: String,
+    pub zonas: Vec<Zona>,
 }
+
+#[derive(Debug, Clone)]
+pub struct Estadio {
+    pub categorias: Vec<Categoria>,
+}
+
 
 //--------------INICIALIZACION DEL MAPEO DEL ESTADIO 
 async fn inicializar_mapeo() -> Estadio {
@@ -65,8 +72,8 @@ async fn inicializar_mapeo() -> Estadio {
         numero: num,
         estado: EstadoSilla::Disponible,
     }).collect();
-    zona_a.filas.insert(1, fila_1_a);
-    zona_a.filas.insert(2, fila_2_a);
+    zona_a.filas.insert(1, Fila { numero: 1, asientos: fila_1_a });
+    zona_a.filas.insert(2, Fila { numero: 2, asientos: fila_2_a });
 
     // Agregar filas y sillas a Zona B
     let fila_1_b: Vec<Silla> = (1..=12).map(|num| Silla {
@@ -77,8 +84,8 @@ async fn inicializar_mapeo() -> Estadio {
         numero: num,
         estado: EstadoSilla::Disponible,
     }).collect();
-    zona_b.filas.insert(1, fila_1_b);
-    zona_b.filas.insert(2, fila_2_b);
+    zona_b.filas.insert(1, Fila { numero: 1, asientos: fila_1_b });
+    zona_b.filas.insert(2, Fila { numero: 2, asientos: fila_2_b });
 
     platea_este.zonas.push(zona_a);
     platea_este.zonas.push(zona_b);
@@ -108,8 +115,8 @@ async fn inicializar_mapeo() -> Estadio {
         numero: num,
         estado: EstadoSilla::Disponible,
     }).collect();
-    zona_c.filas.insert(1, fila_1_c);
-    zona_c.filas.insert(2, fila_2_c);
+    zona_c.filas.insert(1, Fila { numero: 1, asientos: fila_1_c });
+    zona_c.filas.insert(2, Fila { numero: 2, asientos: fila_2_c });
 
     // Agregar filas y sillas a Zona D
     let fila_1_d: Vec<Silla> = (1..=12).map(|num| Silla {
@@ -120,8 +127,8 @@ async fn inicializar_mapeo() -> Estadio {
         numero: num,
         estado: EstadoSilla::Disponible,
     }).collect();
-    zona_d.filas.insert(1, fila_1_d);
-    zona_d.filas.insert(2, fila_2_d);
+    zona_d.filas.insert(1, Fila { numero: 1, asientos: fila_1_d });
+    zona_d.filas.insert(2, Fila { numero: 2, asientos: fila_2_d });
 
     general.zonas.push(zona_c);
     general.zonas.push(zona_d);
@@ -184,39 +191,79 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
                     break;
                 }
 
-                let categoria_index = opcion.parse::<usize>().ok();
-                match categoria_index {
-                    Some(index) if index > 0 && index <= estadio_guard.categorias.len() => {
-                        let categoria = &estadio_guard.categorias[index - 1];
-                        println!("Categoría seleccionada: {}", categoria.nombre); // Diagnóstico
+                if let Ok(categoria_index) = opcion.parse::<usize>() {
+                    if categoria_index > 0 && categoria_index <= estadio_guard.categorias.len() {
+                        let categoria = &estadio_guard.categorias[categoria_index - 1];
+                        let max_boletos = 10; // Definir el máximo de boletos permitidos
+                        let categoria_nombre = categoria.nombre.clone();
 
-                        // Llamada a la función para buscar asientos
-                        let resultado = estadio_guard.buscar_mejores_asientos_2(categoria.nombre.clone(), None, 4);
-                        let response = match resultado {
-                            Some(asientos) => format!("Asientos encontrados: {:?}\n", asientos),
-                            None => "No se encontraron asientos disponibles\n".to_string(),
-                        };
-
-                        // Enviar la respuesta al cliente
-                        if let Err(e) = writer.write_all(response.as_bytes()).await {
-                            eprintln!("Error al enviar la respuesta: {:?}", e);
+                        // Solicitar la cantidad de asientos
+                        buffer.clear();
+                        let msg = format!("Selecciona la cantidad de asientos (máximo {}):\n", max_boletos);
+                        if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                            eprintln!("Error al enviar mensaje de cantidad de asientos: {:?}", e);
                             break;
                         }
                         if let Err(e) = writer.flush().await {
                             eprintln!("Error al hacer flush: {:?}", e);
                             break;
                         }
-                    }
-                    _ => {
-                        println!("Opción inválida o fuera de rango: {}", opcion); // Diagnóstico
-                        let msg = "Opción inválida\n";
+
+                        match buf_reader.read_line(&mut buffer).await {
+                            Ok(bytes_read) if bytes_read > 0 => {
+                                let cantidad = buffer.trim().parse::<u32>();
+                                match cantidad {
+                                    Ok(cantidad) if cantidad > 0 && cantidad <= max_boletos => {
+                                        // Llamada a la función para buscar asientos
+                                        let resultado = estadio_guard.buscar_mejores_asientos_2(categoria_nombre, cantidad, max_boletos);
+                                        let response = match resultado {
+                                            Some(asientos) => format!("Asientos encontrados: {:?}\n", asientos),
+                                            None => "No se encontraron asientos disponibles\n".to_string(),
+                                        };
+
+                                        // Enviar la respuesta al cliente
+                                        if let Err(e) = writer.write_all(response.as_bytes()).await {
+                                            eprintln!("Error al enviar la respuesta: {:?}", e);
+                                            break;
+                                        }
+                                        if let Err(e) = writer.flush().await {
+                                            eprintln!("Error al hacer flush: {:?}", e);
+                                            break;
+                                        }
+                                    }
+                                    _ => {
+                                        let msg = format!("Cantidad inválida. Debe ser entre 1 y {}.\n", max_boletos);
+                                        if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                                            eprintln!("Error al enviar mensaje de cantidad inválida: {:?}", e);
+                                        }
+                                        if let Err(e) = writer.flush().await {
+                                            eprintln!("Error al hacer flush: {:?}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(_) => eprintln!("No se recibió ningún dato para la cantidad de asientos"),
+                            Err(e) => {
+                                eprintln!("Error al leer la cantidad de asientos: {:?}", e);
+                                break;
+                            }
+                        }
+                    } else {
+                        let msg = "Opción de categoría inválida\n";
                         if let Err(e) = writer.write_all(msg.as_bytes()).await {
                             eprintln!("Error al enviar mensaje de opción inválida: {:?}", e);
                         }
                         if let Err(e) = writer.flush().await {
                             eprintln!("Error al hacer flush: {:?}", e);
-                            break;
                         }
+                    }
+                } else {
+                    let msg = "Opción inválida\n";
+                    if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                        eprintln!("Error al enviar mensaje de opción inválida: {:?}", e);
+                    }
+                    if let Err(e) = writer.flush().await {
+                        eprintln!("Error al hacer flush: {:?}", e);
                     }
                 }
             }
@@ -249,89 +296,192 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //=======================FUNCIONES DE BUSQUEDA, MODIFICACION DE ESTADO========================
 //--------------------FUNCION DE BUSQUEDA DE MEJORES SILLAS
 impl Estadio {
+    pub fn reservar_asientos(
+        &mut self,
+        categoria_nombre: &str,
+        zona_nombre: &str,
+        fila_numero: u32,
+        asientos: Vec<u32>,
+    ) -> Result<(), String> {
+        // Buscar la categoría correspondiente por nombre
+        let categoria = self.categorias.iter_mut().find(|c| c.nombre == categoria_nombre)
+            .ok_or("Categoría no encontrada")?;
+        
+        // Buscar la zona correspondiente por nombre
+        let zona = categoria.zonas.iter_mut().find(|z| z.nombre == zona_nombre)
+            .ok_or("Zona no encontrada")?;
+        
+        // Buscar la fila correspondiente por número
+        let fila = zona.filas.get_mut(&fila_numero)
+            .ok_or("Fila no encontrada")?;
+        
+        // Cambiar el estado de los asientos a Reservada
+        for numero in asientos {
+            let silla = fila.asientos.iter_mut().find(|s| s.numero == numero)
+                .ok_or("Asiento no encontrado")?;
+            
+            if silla.estado == EstadoSilla::Disponible {
+                silla.estado = EstadoSilla::Reservada;
+            } else {
+                return Err("El asiento no está disponible para reserva".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn comprar_asientos(
+        &mut self,
+        categoria_nombre: &str,
+        zona_nombre: &str,
+        fila_numero: u32,
+        asientos: Vec<u32>,
+    ) -> Result<(), String> {
+        // Buscar la categoría correspondiente por nombre
+        let categoria = self.categorias.iter_mut().find(|c| c.nombre == categoria_nombre)
+            .ok_or("Categoría no encontrada")?;
+        
+        // Buscar la zona correspondiente por nombre
+        let zona = categoria.zonas.iter_mut().find(|z| z.nombre == zona_nombre)
+            .ok_or("Zona no encontrada")?;
+        
+        // Buscar la fila correspondiente por número
+        let fila = zona.filas.get_mut(&fila_numero)
+            .ok_or("Fila no encontrada")?;
+        
+        // Cambiar el estado de los asientos a Comprada
+        for numero in asientos {
+            let silla = fila.asientos.iter_mut().find(|s| s.numero == numero)
+                .ok_or("Asiento no encontrado")?;
+            
+            if silla.estado == EstadoSilla::Reservada {
+                silla.estado = EstadoSilla::Comprada;
+            } else {
+                return Err("El asiento no está reservado para compra".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn cancelar_reserva(
+        &mut self,
+        categoria_nombre: &str,
+        zona_nombre: &str,
+        fila_numero: u32,
+        asientos: Vec<u32>,
+    ) -> Result<(), String> {
+        // Buscar la categoría correspondiente por nombre
+        let categoria = self.categorias.iter_mut().find(|c| c.nombre == categoria_nombre)
+            .ok_or("Categoría no encontrada")?;
+        
+        // Buscar la zona correspondiente por nombre
+        let zona = categoria.zonas.iter_mut().find(|z| z.nombre == zona_nombre)
+            .ok_or("Zona no encontrada")?;
+        
+        // Buscar la fila correspondiente por número
+        let fila = zona.filas.get_mut(&fila_numero)
+            .ok_or("Fila no encontrada")?;
+        
+        // Cambiar el estado de los asientos a Disponible
+        for numero in asientos {
+            let silla = fila.asientos.iter_mut().find(|s| s.numero == numero)
+                .ok_or("Asiento no encontrado")?;
+            
+            if silla.estado == EstadoSilla::Reservada {
+                silla.estado = EstadoSilla::Disponible;
+            } else {
+                return Err("El asiento no está reservado".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn buscar_mejores_asientos_2(
         &self,
         categoria_nombre: String,
-        zona_nombre: Option<String>,
         cantidad: u32,
+        max_boletos: u32,
     ) -> Option<Vec<(String, u32, Vec<u32>)>> {
         // Buscar la categoría correspondiente por nombre
         let categoria = self.categorias.iter().find(|c| c.nombre == categoria_nombre)?;
-
+    
+        if cantidad > max_boletos {
+            println!("La cantidad solicitada excede el límite máximo de boletos.");
+            return None;
+        }
+    
         let mut mejor_opcion: Option<Vec<(String, u32, Vec<u32>)>> = None;
         let mut max_asientos_juntos = 0;
-
-        let buscar_zona = |zona: &Zona, cantidad: u32| -> Option<Vec<(String, u32, Vec<u32>)>> {
+    
+        for zona in &categoria.zonas {
             let mut mejor_asientos_en_zona: Option<Vec<(String, u32, Vec<u32>)>> = None;
-
+    
             for (fila_numero, fila) in &zona.filas {
                 let mut asientos_juntos: Vec<u32> = Vec::new();
-
-                for silla in fila {
+                let mut asientos_proximos: Vec<u32> = Vec::new();
+    
+                // Iterar sobre los asientos en la fila
+                for silla in fila.asientos.iter() {
                     if matches!(silla.estado, EstadoSilla::Disponible) {
                         asientos_juntos.push(silla.numero);
+                        if asientos_juntos.len() == cantidad as usize {
+                            let asientos = asientos_juntos.clone();
+                            mejor_asientos_en_zona = Some(vec![(zona.nombre.clone(), *fila_numero, asientos)]);
+                            break;
+                        }
                     } else {
-                        asientos_juntos.clear(); // Reiniciar si encontramos un asiento no disponible
-                    }
-
-                    if asientos_juntos.len() == cantidad as usize {
-                        let asientos = asientos_juntos.clone();
-                        mejor_asientos_en_zona = Some(vec![(zona.nombre.clone(), *fila_numero, asientos)]);
-                        break;
+                        // Tratar de añadir asientos no disponibles a los asientos próximos
+                        if !asientos_juntos.is_empty() {
+                            asientos_proximos.push(silla.numero);
+                            if asientos_proximos.len() > 0 && asientos_juntos.len() >= 1 {
+                                // Agregar los asientos encontrados en la misma fila
+                                asientos_proximos.extend(asientos_juntos.clone());
+                                asientos_juntos.clear();
+                            }
+                        }
                     }
                 }
-
+    
                 if mejor_asientos_en_zona.is_some() {
                     break;
                 }
             }
-
-            mejor_asientos_en_zona
-        };
-
-        if let Some(zona_nombre) = zona_nombre {
-            // Buscar en la zona específica si se proporciona
-            if let Some(zona) = categoria.zonas.iter().find(|z| z.nombre == zona_nombre) {
-                mejor_opcion = buscar_zona(zona, cantidad);
-            }
-        }
-
-        if mejor_opcion.is_none() {
-            // Buscar en todas las zonas si no se encontró en la zona específica o si no se proporcionó
-            for zona in &categoria.zonas {
-                if let Some(asientos_en_zona) = buscar_zona(zona, cantidad) {
-                    let cantidad_juntos = asientos_en_zona.iter().map(|(_, _, asientos)| asientos.len()).sum::<usize>();
-
-                    // Si encontramos más asientos juntos en esta zona que en la mejor opción actual, actualizamos la mejor opción
-                    if cantidad_juntos > max_asientos_juntos {
-                        max_asientos_juntos = cantidad_juntos;
-                        mejor_opcion = Some(asientos_en_zona);
-                    }
+    
+            if let Some(asientos_en_zona) = mejor_asientos_en_zona {
+                let cantidad_juntos = asientos_en_zona.iter().map(|(_, _, asientos)| asientos.len()).sum::<usize>();
+    
+                // Si encontramos más asientos juntos en esta zona que en la mejor opción actual, actualizamos la mejor opción
+                if cantidad_juntos > max_asientos_juntos {
+                    max_asientos_juntos = cantidad_juntos;
+                    mejor_opcion = Some(asientos_en_zona);
                 }
             }
         }
-
-        // Si no encontramos suficientes asientos juntos en ninguna zona, buscamos la mejor combinación posible
+    
+        // Si no encontramos suficientes asientos juntos, buscar la mejor combinación posible
         if max_asientos_juntos < cantidad as usize {
             mejor_opcion = None;
             let mut asientos_totales: Vec<(String, u32, Vec<u32>)> = Vec::new();
             let mut asientos_encontrados = 0;
-
+    
             for zona in &categoria.zonas {
                 for (fila_numero, fila) in &zona.filas {
                     let mut asientos_juntos: Vec<u32> = Vec::new();
-
-                    for silla in fila {
+    
+                    // Iterar sobre los asientos en la fila
+                    for silla in fila.asientos.iter() {
                         if matches!(silla.estado, EstadoSilla::Disponible) {
                             asientos_juntos.push(silla.numero);
                             asientos_encontrados += 1;
-
+    
                             if asientos_encontrados == cantidad {
                                 asientos_totales.push((zona.nombre.clone(), *fila_numero, asientos_juntos));
                                 return Some(asientos_totales);
                             }
                         }
-
+    
                         if asientos_juntos.len() > 0 && !matches!(silla.estado, EstadoSilla::Disponible) {
                             if !asientos_juntos.is_empty() {
                                 asientos_totales.push((zona.nombre.clone(), *fila_numero, asientos_juntos.clone()));
@@ -339,22 +489,22 @@ impl Estadio {
                             }
                         }
                     }
-
+    
                     if !asientos_juntos.is_empty() {
                         asientos_totales.push((zona.nombre.clone(), *fila_numero, asientos_juntos.clone()));
                     }
-
+    
                     if asientos_encontrados >= cantidad {
                         return Some(asientos_totales);
                     }
                 }
             }
-
+    
             if asientos_encontrados >= cantidad {
                 mejor_opcion = Some(asientos_totales);
             }
         }
-
+    
         mejor_opcion
     }
 }

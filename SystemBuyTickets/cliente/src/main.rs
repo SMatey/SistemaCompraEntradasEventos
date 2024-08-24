@@ -1,47 +1,64 @@
 use tokio::net::TcpStream;
-use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::io::AsyncReadExt;
+use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader, AsyncReadExt};
 use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // Establece la conexión con el servidor una vez
     let mut stream = TcpStream::connect("127.0.0.1:7878").await?;
     let mut buffer = [0; 1024];
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin);
 
     loop {
-        // Limpiar la pantalla (solo en Windows, si usas otro sistema operativo, ajusta esto)
+        // Limpiar pantalla y mostrar menú
         std::process::Command::new("cmd").args(&["/c", "cls"]).status()?;
 
-        // Leer la respuesta del servidor
+        // Leer respuesta del servidor
         let bytes_read = stream.read(&mut buffer).await?;
         let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
         print!("{}", responses);
 
         // Leer entrada del usuario
-        print!("-> ");
+        print!("Elija una opción: ");
         io::stdout().flush().await?;
         let mut input = String::new();
         reader.read_line(&mut input).await?;
+        let opcion = input.trim();
 
-        let entrada = input.trim().to_string();
+        // Enviar la opción al servidor
+        stream.write_all(opcion.as_bytes()).await?;
+        stream.flush().await?;
 
-        // Verificar si el usuario ingresó '0' para salir
-        if entrada == "0" {
-            println!("Saliendo del sistema...");
+        // Leer la respuesta del servidor después de elegir categoría
+        let bytes_read = stream.read(&mut buffer).await?;
+        let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
+        print!("{}", responses);
+
+        if opcion == "0" {
+            println!("Conexión terminada.");
             break;
         }
 
-        // Enviar la entrada al servidor
-        stream.write_all(entrada.as_bytes()).await?;
+        // Selección de cantidad de asientos
+        print!("Ingrese la cantidad de asientos (máx. 6): ");
+        io::stdout().flush().await?;
+        input.clear();
+        reader.read_line(&mut input).await?;
+        let cantidad = input.trim().parse::<u32>().unwrap_or(0);
+
+        if cantidad == 0 || cantidad > 6 {
+            println!("Cantidad no válida o fuera del rango permitido.");
+            continue;
+        }
+
+        // Enviar la cantidad al servidor
+        stream.write_all(input.trim().as_bytes()).await?;
         stream.flush().await?;
 
-        // Leer la respuesta del servidor (resultados de búsqueda)
+        // Leer la respuesta final del servidor
         let bytes_read = stream.read(&mut buffer).await?;
-        let result = String::from_utf8_lossy(&buffer[..bytes_read]);
-        println!("{}", result);
+        let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
+        print!("{}", responses);
     }
 
     Ok(())
