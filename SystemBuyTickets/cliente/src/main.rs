@@ -1,68 +1,32 @@
 use tokio::net::TcpStream;
-use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader, AsyncReadExt};
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut stream = TcpStream::connect("127.0.0.1:7878").await?;
-    let mut buffer = [0; 1024];
-    let stdin = io::stdin();
-    let mut reader = BufReader::new(stdin);
+    // Definir las solicitudes que se van a enviar
+    let solicitudes = vec![
+        (0, 2, "true"),   // Solicitud 1: Categoría 0, 2 boletos, confirmar compra
+        (1, 4, "false"),  // Solicitud 2: Categoría 1, 4 boletos, cancelar
+        (0, 1, "true"),   // Solicitud 3: Categoría 0, 1 boleto, confirmar compra
+    ];
 
-    loop {
-        // Limpiar pantalla y mostrar menú
-        std::process::Command::new("cmd").args(&["/c", "cls"]).status()?;
+    // Iterar sobre cada solicitud
+    for (indice_categoria, cantidad_boletos, confirmar_compra) in solicitudes {
+        // Conectar al servidor
+        let mut stream = TcpStream::connect("127.0.0.1:7878").await?;
+
+        // Enviar datos al servidor
+        let mensaje = format!("{},{},{}", indice_categoria, cantidad_boletos, confirmar_compra);
+        stream.write_all(mensaje.as_bytes()).await?;
 
         // Leer respuesta del servidor
-        let bytes_read = stream.read(&mut buffer).await?;
-        let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
-        print!("{}", responses);
+        let mut buffer = [0; 1024];
+        let bytes_leidos = stream.read(&mut buffer).await?;
+        let respuesta = String::from_utf8_lossy(&buffer[..bytes_leidos]);
 
-        // Leer entrada del usuario
-        print!("Elija una opción: ");
-        io::stdout().flush().await?;
-        let mut input = String::new();
-        reader.read_line(&mut input).await?;
-        let opcion = input.trim().to_string(); // Trim and convert to String
-
-        // Enviar la opción al servidor
-        if !opcion.is_empty() {
-            println!("Enviando opción: {}", opcion); // Debugging
-            stream.write_all(opcion.as_bytes()).await?;
-            stream.flush().await?;
-        }
-
-        // Leer la respuesta del servidor después de elegir categoría
-        let bytes_read = stream.read(&mut buffer).await?;
-        let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
-        println!("Respuesta del servidor: {}", responses); // Debugging
-
-        if opcion == "0" {
-            println!("Conexión terminada.");
-            break;
-        }
-
-        // Selección de cantidad de asientos
-        print!("Ingrese la cantidad de asientos (máx. 6): ");
-        io::stdout().flush().await?;
-        input.clear();
-        reader.read_line(&mut input).await?;
-        let cantidad = input.trim().parse::<u32>().unwrap_or(0);
-
-        if cantidad == 0 || cantidad > 6 {
-            println!("Cantidad no válida o fuera del rango permitido.");
-            continue;
-        }
-
-        // Enviar la cantidad al servidor
-        println!("Enviando cantidad: {}", cantidad); // Debugging
-        stream.write_all(cantidad.to_string().as_bytes()).await?;
-        stream.flush().await?;
-
-        // Leer la respuesta final del servidor
-        let bytes_read = stream.read(&mut buffer).await?;
-        let responses = String::from_utf8_lossy(&buffer[..bytes_read]);
-        println!("Respuesta del servidor: {}", responses); // Debugging
+        // Imprimir la respuesta
+        println!("Respuesta del servidor: {}", respuesta);
     }
 
     Ok(())
