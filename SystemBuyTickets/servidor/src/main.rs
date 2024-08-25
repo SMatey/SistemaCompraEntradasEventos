@@ -56,7 +56,7 @@ async fn inicializar_mapeo() -> Estadio {
             };
 
             // Agregar filas y sillas a cada zona
-            let fila_1: Vec<Silla> = (1..=20).map(|num| Silla {
+            let fila_1: Vec<Silla> = (1..=10).map(|num| Silla {
                 numero: num,
                 estado: match num % 5 {
                     0 => EstadoSilla::Reservada,
@@ -65,7 +65,7 @@ async fn inicializar_mapeo() -> Estadio {
                 },
             }).collect();
             
-            let fila_2: Vec<Silla> = (21..=40).map(|num| Silla {
+            let fila_2: Vec<Silla> = (11..=20).map(|num| Silla {
                 numero: num,
                 estado: match num % 6 {
                     0 => EstadoSilla::Comprada,
@@ -152,24 +152,25 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
     let mut estadio = estadio.lock().await;
 
     // Buscar los mejores asientos disponibles
-    let (mut asientos_recomendados, mensaje) = estadio.buscar_asientos(indice_categoria, cantidad_boletos, 10);
+    let (mut asientos_recomendados, mensaje, nombre_categoria) = estadio.buscar_asientos(indice_categoria, cantidad_boletos, 10);
 
     // Crear mensaje de respuesta para el cliente
-    let mut respuesta = format!("{}\n", mensaje);
+    let mut respuesta = format!("Categoría elegida: {}\n", nombre_categoria);
+    respuesta.push_str(&format!("{}\n", mensaje));
+
     if !asientos_recomendados.is_empty() {
         respuesta.push_str("Asientos recomendados:\n");
-        for silla in &asientos_recomendados {
-            respuesta.push_str(&format!("Número: {}, Estado: {:?}\n", silla.numero, silla.estado));
+        for (zona_nombre, numero_fila, silla) in &asientos_recomendados {
+            respuesta.push_str(&format!("Zona: {}, Fila: {}, Asiento: {}\n", zona_nombre, numero_fila, silla.numero));
         }
-
-        // Reservar los asientos recomendados
-        estadio.reservar_sillas(&mut asientos_recomendados);
 
         // Confirmar o cancelar la compra
         if confirmar_compra {
+            // Cambiar el estado de las sillas a Comprada
             estadio.confirmar_compra_sillas(indice_categoria, &mut asientos_recomendados, true);
             respuesta.push_str("\nCompra realizada.");
         } else {
+            // Cambiar el estado de las sillas a Disponible (cancelación)
             estadio.confirmar_compra_sillas(indice_categoria, &mut asientos_recomendados, false);
             respuesta.push_str("\nReserva cancelada, asientos puestos de nuevo disponibles.");
         }
@@ -211,9 +212,14 @@ async fn main() {
 //=======================FUNCIONES DE BUSQUEDA, MODIFICACION DE ESTADO========================
 impl Estadio {
     // Función para buscar los mejores asientos disponibles en una categoría
-    fn buscar_asientos(&mut self, indice_categoria: usize, cantidad_boletos: u32, max_boletos: u32) -> (Vec<Silla>, String) {
-        if indice_categoria >= self.categorias.len() {
-            return (Vec::new(), "Categoría no válida".to_string());
+    fn buscar_asientos(&mut self, indice_categoria: usize, cantidad_boletos: u32, max_boletos: u32) -> (Vec<(String, u32, Silla)>, String, String) {
+        // Verificación de la cantidad de boletos permitidos
+        if cantidad_boletos > max_boletos {
+            return (Vec::new(), "Transacción no permitida: Excede el máximo de asientos permitidos para comprar".to_string(), String::new());
+        }
+
+        if (indice_categoria >= self.categorias.len()) {
+            return (Vec::new(), "Categoría no válida".to_string(), String::new());
         }
 
         let categoria = &mut self.categorias[indice_categoria];
@@ -227,43 +233,40 @@ impl Estadio {
                     .filter(|silla| silla.estado == EstadoSilla::Disponible)
                     .collect();
 
-                // Si hay suficientes asientos disponibles, los selecciona
-                if asientos_disponibles.len() >= cantidad_boletos as usize {
-                    for silla in asientos_disponibles.iter_mut().take(cantidad_boletos as usize) {
-                        asientos_recomendados.push((*silla).clone());
-                    }
-                    mensaje = format!("Asientos encontrados en la zona '{}', fila '{}'", zona.nombre, numero_fila);
-                    self.reservar_sillas(&mut asientos_recomendados);
-                    return (asientos_recomendados, mensaje);
+                // Añadir asientos hasta completar la cantidad solicitada
+                for silla in asientos_disponibles.iter_mut().take(cantidad_boletos as usize - asientos_recomendados.len()) {
+                    asientos_recomendados.push((zona.nombre.clone(), *numero_fila, silla.clone()));
+                    silla.estado = EstadoSilla::Reservada; // Actualiza el estado de la silla al encontrarla
                 }
+
+                // Si se han encontrado suficientes asientos, detener la búsqueda
+                if asientos_recomendados.len() == cantidad_boletos as usize {
+                    break;
+                }
+            }
+
+            // Si se han encontrado suficientes asientos, detener la búsqueda
+            if asientos_recomendados.len() == cantidad_boletos as usize {
+                break;
             }
         }
 
-        mensaje = "No se encontraron suficientes asientos disponibles".to_string();
-        (Vec::new(), mensaje)
-    }
-
-    // Función para reservar asientos (cambia su estado a Reservada)
-    fn reservar_sillas(&mut self, asientos: &mut Vec<Silla>) {
-        for silla in asientos.iter_mut() {
-            silla.estado = EstadoSilla::Reservada;
-        }
-    }
-
-    // Función para confirmar o cancelar la compra de asientos
-    fn confirmar_compra_sillas(&mut self, indice_categoria: usize, asientos: &mut Vec<Silla>, confirmar: bool) {
-        if indice_categoria >= self.categorias.len() {
-            eprintln!("Categoría no válida");
-            return;
+        if asientos_recomendados.len() < cantidad_boletos as usize {
+            mensaje = format!("No se encontraron suficientes asientos disponibles en la categoría: {}", categoria.nombre);
         }
 
+        (asientos_recomendados, mensaje, categoria.nombre.clone())
+    }
+
+    // Función para confirmar o cancelar la compra de asientos (cambia su estado a Comprada o Disponible)
+    fn confirmar_compra_sillas(&mut self, indice_categoria: usize, asientos: &mut Vec<(String, u32, Silla)>, confirmar: bool) {
         let categoria = &mut self.categorias[indice_categoria];
-
-        for zona in &mut categoria.zonas {
-            for (_, fila_asientos) in &mut zona.filas {
-                for silla in fila_asientos.iter_mut() {
-                    if asientos.iter().any(|a| a.numero == silla.numero) {
-                        silla.estado = if confirmar {
+        for (zona_nombre, numero_fila, silla) in asientos.iter_mut() {
+            // Encontrar la silla en la estructura del estadio
+            if let Some(zona) = categoria.zonas.iter_mut().find(|zona| zona.nombre == *zona_nombre) {
+                if let Some(fila) = zona.filas.get_mut(&numero_fila) {
+                    if let Some(silla_actual) = fila.iter_mut().find(|s| s.numero == silla.numero) {
+                        silla_actual.estado = if confirmar {
                             EstadoSilla::Comprada
                         } else {
                             EstadoSilla::Disponible

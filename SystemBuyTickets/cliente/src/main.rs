@@ -6,16 +6,17 @@ use std::error::Error;
 async fn main() -> Result<(), Box<dyn Error>> {
     // Definir las solicitudes que se van a enviar
     let solicitudes = vec![
-        (0, 9, "true"),   // Solicitud 1: Categoría 0, 2 boletos, confirmar compra
+        (0, 2, "true"),   // Solicitud 1: Categoría 0, 2 boletos, confirmar compra
         (1, 4, "false"),  // Solicitud 2: Categoría 1, 4 boletos, cancelar
-        (0, 2, "true"),   // Solicitud 3: Categoría 0, 1 boleto, confirmar compra
-        (0, 7, "true"),   // Solicitud 1: Categoría 0, 2 boletos, confirmar compra
-        (1, 4, "true"),  // Solicitud 2: Categoría 1, 4 boletos, cancelar
-        (0, 1, "true"),
-        (0, 5, "true"),   // Solicitud 1: Categoría 0, 2 boletos, confirmar compra
-        (1, 11, "false"),  // Solicitud 2: Categoría 1, 4 boletos, cancelar
-        (0, 1, "true"),
-        
+        (0, 1, "true"),   // Solicitud 3: Categoría 0, 1 boleto, confirmar compra
+        (1, 4, "true"),
+        (1, 4, "true"),
+        (1, 4, "true"),
+        (1, 4, "true"),
+        (1, 4, "true"),
+        (1, 4, "true"),
+        (1, 4, "true"),
+        (2, 4, "true"),
     ];
 
     // Iterar sobre cada solicitud
