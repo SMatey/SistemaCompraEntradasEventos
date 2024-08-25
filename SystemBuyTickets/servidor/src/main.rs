@@ -198,6 +198,8 @@ async fn main() {
             Ok((stream, _)) => {
                 let estadio = estadio.clone();
                 tokio::spawn(async move {
+                    //Mensaje que se muestra cada que se recibe una solicitud
+                    println!("-------------Solicitud Recibida.\n");
                     manejar_cliente(stream, estadio).await;
                 });
             }

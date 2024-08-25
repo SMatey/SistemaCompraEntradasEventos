@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         (3, 10, "false"),  // Solicitud 10: Categoría 3, 10 boletos, cancelar
         (3, 9, "true"),   // Solicitud 11: Categoría 3, 9 boletos, confirmar compra
         (3, 9, "true"),   // Solicitud 12: Categoría 3, 9 boletos, confirmar compra
-        (0, 10, "true"),   // Solicitud 13: Categoría 0, 10 boletos, confirmar compra
+        (0, 2, "true"),   // Solicitud 13: Categoría 0, 10 boletos, confirmar compra
         (0, 10, "true"),   // Solicitud 14: Categoría 0, 10 boletos, confirmar compra
     ];
 
