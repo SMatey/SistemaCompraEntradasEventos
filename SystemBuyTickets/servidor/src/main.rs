@@ -218,7 +218,7 @@ impl Estadio {
             return (Vec::new(), "Transacción no permitida: Excede el máximo de asientos permitidos para comprar".to_string(), String::new());
         }
 
-        if (indice_categoria >= self.categorias.len()) {
+        if indice_categoria >= self.categorias.len() {
             return (Vec::new(), "Categoría no válida".to_string(), String::new());
         }
 
