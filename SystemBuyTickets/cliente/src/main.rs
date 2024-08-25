@@ -15,6 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         (0, 5, "true"),   // Solicitud 1: Categoría 0, 2 boletos, confirmar compra
         (1, 11, "false"),  // Solicitud 2: Categoría 1, 4 boletos, cancelar
         (0, 1, "true"),
+        
     ];
 
     // Iterar sobre cada solicitud

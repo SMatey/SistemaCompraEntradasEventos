@@ -3,6 +3,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncReadExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::collections::HashMap;
 
 // Estructuras necesarias
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,14 +22,9 @@ pub struct Silla {
 #[derive(Debug, Clone)]
 pub struct Zona {
     pub nombre: String,
-    pub filas: Vec<Fila>,
+    pub filas: HashMap<u32, Vec<Silla>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Fila {
-    pub numero: u32,
-    pub asientos: Vec<Silla>,
-}
 #[derive(Debug, Clone)]
 pub struct Categoria {
     pub nombre: String,
@@ -56,11 +52,11 @@ async fn inicializar_mapeo() -> Estadio {
         for nombre_zona in vec!["Zona A", "Zona B", "Zona C"] {
             let mut zona = Zona {
                 nombre: nombre_zona.to_string(),
-                filas: Vec::new(),
+                filas: HashMap::new(),
             };
 
             // Agregar filas y sillas a cada zona
-            let fila_1: Vec<Silla> = (1..=10).map(|num| Silla {
+            let fila_1: Vec<Silla> = (1..=20).map(|num| Silla {
                 numero: num,
                 estado: match num % 5 {
                     0 => EstadoSilla::Reservada,
@@ -69,7 +65,7 @@ async fn inicializar_mapeo() -> Estadio {
                 },
             }).collect();
             
-            let fila_2: Vec<Silla> = (11..=20).map(|num| Silla {
+            let fila_2: Vec<Silla> = (21..=40).map(|num| Silla {
                 numero: num,
                 estado: match num % 6 {
                     0 => EstadoSilla::Comprada,
@@ -78,12 +74,8 @@ async fn inicializar_mapeo() -> Estadio {
                 },
             }).collect();
             
-            // Crear filas y agregar a la zona
-            let fila_1_obj = Fila { numero: 1, asientos: fila_1 };
-            let fila_2_obj = Fila { numero: 2, asientos: fila_2 };
-            
-            zona.filas.push(fila_1_obj);
-            zona.filas.push(fila_2_obj);
+            zona.filas.insert(1, fila_1);
+            zona.filas.insert(2, fila_2);
 
             categoria.zonas.push(zona);
         }
@@ -93,6 +85,7 @@ async fn inicializar_mapeo() -> Estadio {
 
     Estadio { categorias }
 }
+
 
 // Estructura para datos del cliente
 #[derive(Debug)]
@@ -158,48 +151,15 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
     // Bloquear el estadio para modificarlo
     let mut estadio = estadio.lock().await;
 
-    // Verifica si el índice de categoría es válido
-    if indice_categoria >= estadio.categorias.len() {
-        let respuesta = format!("Categoría no válida");
-        if let Err(e) = stream.write_all(respuesta.as_bytes()).await {
-            eprintln!("Error al escribir al stream: {:?}", e);
-        }
-        return;
-    }
-
-    // Obtener el nombre de la categoría
-    let nombre_categoria = estadio.categorias[indice_categoria].nombre.clone();
-
     // Buscar los mejores asientos disponibles
     let (mut asientos_recomendados, mensaje) = estadio.buscar_asientos(indice_categoria, cantidad_boletos, 10);
 
     // Crear mensaje de respuesta para el cliente
-    let mut respuesta = format!("Categoría: {}\n{}\n", nombre_categoria, mensaje);
+    let mut respuesta = format!("{}\n", mensaje);
     if !asientos_recomendados.is_empty() {
         respuesta.push_str("Asientos recomendados:\n");
         for silla in &asientos_recomendados {
-            // Buscar la zona y la fila de cada asiento
-            let (zona_nombre, fila_numero) = estadio
-                .categorias[indice_categoria]
-                .zonas
-                .iter()
-                .find_map(|zona| {
-                    zona.filas.iter().find_map(|fila| {
-                        fila.asientos.iter().find_map(|s| {
-                            if s.numero == silla.numero {
-                                Some((zona.nombre.clone(), fila.numero))
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                })
-                .unwrap_or(("Desconocida".to_string(), 0));
-
-            respuesta.push_str(&format!(
-                "Zona: {}, Fila: {}, Asiento: {}, Estado: {:?}\n",
-                zona_nombre, fila_numero, silla.numero, silla.estado
-            ));
+            respuesta.push_str(&format!("Número: {}, Estado: {:?}\n", silla.numero, silla.estado));
         }
 
         // Reservar los asientos recomendados
@@ -228,11 +188,11 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
 #[tokio::main]
 async fn main() {
     let estadio = Arc::new(Mutex::new(inicializar_mapeo().await));
-    let listener = TcpListener::bind("127.0.0.1:7878")
+    let listener = TcpListener::bind(format!("127.0.0.1:7878"))
         .await
         .expect("Error al bindear el puerto");
 
-    println!("Servidor escuchando en el puerto '7878'");
+    println!("Servidor escuchando en el puerto 7878");
 
     loop {
         match listener.accept().await {
@@ -251,119 +211,47 @@ async fn main() {
 //=======================FUNCIONES DE BUSQUEDA, MODIFICACION DE ESTADO========================
 impl Estadio {
     // Función para buscar los mejores asientos disponibles en una categoría
-    pub fn buscar_asientos(
-        &mut self,
-        indice_categoria: usize,
-        cantidad_boletos: u32,
-        max_boletos: u32,
-    ) -> (Vec<Silla>, String) {
+    fn buscar_asientos(&mut self, indice_categoria: usize, cantidad_boletos: u32, max_boletos: u32) -> (Vec<Silla>, String) {
         if indice_categoria >= self.categorias.len() {
             return (Vec::new(), "Categoría no válida".to_string());
         }
 
-        // Verifica si la cantidad de boletos solicitados supera el máximo permitido
-        if cantidad_boletos > max_boletos {
-            return (
-                Vec::new(),
-                format!(
-                    "La cantidad de boletos solicitados ({}) supera el máximo permitido ({})",
-                    cantidad_boletos, max_boletos
-                ),
-            );
-        }
-
         let categoria = &mut self.categorias[indice_categoria];
-        let mut asientos_temp = Vec::new(); // Aquí es donde acumularemos los asientos
+        let mut asientos_recomendados = Vec::new();
+        let mut mensaje = String::from("");
 
-        // Iterar sobre las zonas de la categoría seleccionada
+        // Itera sobre las zonas y filas de la categoría seleccionada
         for zona in &mut categoria.zonas {
-            // Iterar sobre las filas de la zona
-            for fila in &mut zona.filas {
-                // Filtrar los asientos disponibles en la fila actual
-                let mut asientos_disponibles: Vec<&mut Silla> = fila
-                    .asientos
-                    .iter_mut()
+            for (numero_fila, asientos) in &mut zona.filas {
+                let mut asientos_disponibles: Vec<&mut Silla> = asientos.iter_mut()
                     .filter(|silla| silla.estado == EstadoSilla::Disponible)
                     .collect();
 
-                // Buscar asientos juntos en la fila actual
-                let mut encontrados: Vec<Silla> = Vec::new();
-                let mut cont = 0;
-
-                while cont < asientos_disponibles.len() {
-                    let mut grupo = Vec::new();
-
-                    // Buscar grupo de asientos juntos
-                    for i in cont..asientos_disponibles.len() {
-                        if grupo.len() < cantidad_boletos as usize {
-                            grupo.push(asientos_disponibles[i].clone()); // Clonamos el asiento aquí
-                        } else {
-                            break;
-                        }
+                // Si hay suficientes asientos disponibles, los selecciona
+                if asientos_disponibles.len() >= cantidad_boletos as usize {
+                    for silla in asientos_disponibles.iter_mut().take(cantidad_boletos as usize) {
+                        asientos_recomendados.push((*silla).clone());
                     }
-
-                    if grupo.len() == cantidad_boletos as usize {
-                        asientos_temp.extend(grupo);
-                        break;
-                    }
-
-                    // Mover al siguiente grupo
-                    cont += 1;
+                    mensaje = format!("Asientos encontrados en la zona '{}', fila '{}'", zona.nombre, numero_fila);
+                    self.reservar_sillas(&mut asientos_recomendados);
+                    return (asientos_recomendados, mensaje);
                 }
-
-                // Si se encontraron suficientes asientos, salir del loop de filas
-                if asientos_temp.len() >= cantidad_boletos as usize {
-                    break;
-                }
-            }
-
-            // Si ya se han encontrado suficientes asientos, salir del loop de zonas
-            if asientos_temp.len() >= cantidad_boletos as usize {
-                break;
             }
         }
 
-        // Si se encontraron suficientes asientos
-        if asientos_temp.len() >= cantidad_boletos as usize {
-            let asientos_recomendados: Vec<_> = asientos_temp
-                .iter()
-                .cloned()
-                .collect();
-            let mensaje = format!(
-                "Asientos encontrados en la categoría '{}'.",
-                categoria.nombre
-            );
-            self.reservar_sillas(&mut asientos_recomendados.clone());
-            return (asientos_recomendados, mensaje);
-        }
-
-        // Si no se encontraron suficientes asientos
-        let mensaje = "No se encontraron suficientes asientos disponibles".to_string();
+        mensaje = "No se encontraron suficientes asientos disponibles".to_string();
         (Vec::new(), mensaje)
     }
 
     // Función para reservar asientos (cambia su estado a Reservada)
-    pub fn reservar_sillas(&mut self, asientos: &mut Vec<Silla>) {
-        // Iterar sobre cada categoría en el estadio
-        for categoria in &mut self.categorias {
-            // Iterar sobre cada zona en la categoría
-            for zona in &mut categoria.zonas {
-                // Iterar sobre cada fila en la zona
-                for fila in &mut zona.filas {
-                    // Iterar sobre cada silla en la fila
-                    for silla in &mut fila.asientos {
-                        // Si la silla está en la lista de asientos a reservar, cambiar su estado
-                        if asientos.iter().any(|a| a.numero == silla.numero) {
-                            silla.estado = EstadoSilla::Reservada;
-                        }
-                    }
-                }
-            }
+    fn reservar_sillas(&mut self, asientos: &mut Vec<Silla>) {
+        for silla in asientos.iter_mut() {
+            silla.estado = EstadoSilla::Reservada;
         }
     }
 
     // Función para confirmar o cancelar la compra de asientos
-    pub fn confirmar_compra_sillas(&mut self, indice_categoria: usize, asientos: &mut Vec<Silla>, confirmar: bool) {
+    fn confirmar_compra_sillas(&mut self, indice_categoria: usize, asientos: &mut Vec<Silla>, confirmar: bool) {
         if indice_categoria >= self.categorias.len() {
             eprintln!("Categoría no válida");
             return;
@@ -371,13 +259,9 @@ impl Estadio {
 
         let categoria = &mut self.categorias[indice_categoria];
 
-        // Iterar sobre las zonas en la categoría
         for zona in &mut categoria.zonas {
-            // Iterar sobre las filas en cada zona
-            for fila in &mut zona.filas {
-                // Iterar sobre los asientos en cada fila
-                for silla in &mut fila.asientos {
-                    // Verificar si el número de la silla está en la lista de asientos a confirmar
+            for (_, fila_asientos) in &mut zona.filas {
+                for silla in fila_asientos.iter_mut() {
                     if asientos.iter().any(|a| a.numero == silla.numero) {
                         silla.estado = if confirmar {
                             EstadoSilla::Comprada
@@ -390,4 +274,3 @@ impl Estadio {
         }
     }
 }
-
