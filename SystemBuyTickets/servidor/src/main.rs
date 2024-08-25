@@ -174,9 +174,7 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
             estadio.confirmar_compra_sillas(indice_categoria, &mut asientos_recomendados, false);
             respuesta.push_str("\nReserva cancelada, asientos puestos de nuevo disponibles.");
         }
-    } else {
-        respuesta.push_str("No se encontraron suficientes asientos disponibles.");
-    }
+    } 
 
     // Enviar la respuesta al cliente
     if let Err(e) = stream.write_all(respuesta.as_bytes()).await {
