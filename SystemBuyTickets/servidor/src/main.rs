@@ -151,7 +151,7 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
     // Bloquear el estadio para modificarlo
     let mut estadio = estadio.lock().await;
 
-    // Buscar los mejores asientos disponibles
+    // Buscar los mejores asientos disponibles, limite de 10 tickets
     let (mut asientos_recomendados, mensaje, nombre_categoria) = estadio.buscar_asientos(indice_categoria, cantidad_boletos, 10);
 
     // Crear mensaje de respuesta para el cliente
