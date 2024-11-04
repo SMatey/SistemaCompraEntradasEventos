@@ -1,39 +1,75 @@
+// servidor.rs
+
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncReadExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 
 //------------------------------------Estructuras necesarias
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EstadoSilla {
     Disponible,
     Reservada,
     Comprada,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Silla {
     pub numero: u32,
     pub estado: EstadoSilla,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Zona {
     pub nombre: String,
     pub filas: HashMap<u32, Vec<Silla>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Categoria {
     pub nombre: String,
     pub zonas: Vec<Zona>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Estadio {
     pub categorias: Vec<Categoria>,
+}
+
+// Estructuras para la comunicación
+#[derive(Debug, Serialize, Deserialize)]
+struct Solicitud {
+    indice_categoria: usize,
+    cantidad_boletos: u32,
+    confirmar_compra: bool,
+    asientos_recomendados: Option<Vec<AsientoInfoCliente>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RespuestaServidor {
+    categoria: String,
+    mensaje: String,
+    asientos_categoria: Vec<AsientoInfo>,
+    asientos_recomendados: Vec<AsientoInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AsientoInfo {
+    zona: String,
+    fila: u32,
+    asiento: u32,
+    estado: EstadoSilla,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AsientoInfoCliente {
+    zona: String,
+    fila: u32,
+    asiento: u32,
+    // No incluimos 'estado' aquí
 }
 
 //-------------------------------Inicializar el mapeo del estadio
@@ -90,15 +126,40 @@ async fn inicializar_mapeo() -> Estadio {
 
 //=======================FUNCIONES DE BUSQUEDA, MODIFICACION DE ESTADO========================
 impl Estadio {
+    // Función para obtener todos los asientos de una categoría
+    fn obtener_asientos_categoria(&self, indice_categoria: usize) -> (Vec<AsientoInfo>, String) {
+        if indice_categoria >= self.categorias.len() {
+            return (Vec::new(), "Categoría no válida".to_string());
+        }
+
+        let categoria = &self.categorias[indice_categoria];
+        let mut asientos_info = Vec::new();
+
+        for zona in &categoria.zonas {
+            for (numero_fila, asientos) in &zona.filas {
+                for silla in asientos {
+                    asientos_info.push(AsientoInfo {
+                        zona: zona.nombre.clone(),
+                        fila: *numero_fila,
+                        asiento: silla.numero,
+                        estado: silla.estado,
+                    });
+                }
+            }
+        }
+
+        (asientos_info, categoria.nombre.clone())
+    }
+
     // Función para buscar los mejores asientos disponibles en una categoría
-    fn buscar_asientos(&mut self, indice_categoria: usize, cantidad_boletos: u32, max_boletos: u32) -> (Vec<(String, u32, Silla)>, String, String) {
+    fn buscar_asientos(&mut self, indice_categoria: usize, cantidad_boletos: u32, max_boletos: u32) -> (Vec<AsientoInfo>, String) {
         // Verificación de la cantidad de boletos permitidos
         if cantidad_boletos > max_boletos {
-            return (Vec::new(), "Transacción no permitida: Excede el máximo de asientos permitidos para comprar".to_string(), String::new());
+            return (Vec::new(), "Transacción no permitida: Excede el máximo de asientos permitidos para comprar".to_string());
         }
 
         if indice_categoria >= self.categorias.len() {
-            return (Vec::new(), "Categoría no válida".to_string(), String::new());
+            return (Vec::new(), "Categoría no válida".to_string());
         }
 
         let categoria = &mut self.categorias[indice_categoria];
@@ -108,14 +169,19 @@ impl Estadio {
         // Itera sobre las zonas y filas de la categoría seleccionada
         for zona in &mut categoria.zonas {
             for (numero_fila, asientos) in &mut zona.filas {
-                let mut asientos_disponibles: Vec<&mut Silla> = asientos.iter_mut()
+                let asientos_disponibles: Vec<&mut Silla> = asientos.iter_mut()
                     .filter(|silla| silla.estado == EstadoSilla::Disponible)
                     .collect();
 
                 // Añadir asientos hasta completar la cantidad solicitada
-                for silla in asientos_disponibles.iter_mut().take(cantidad_boletos as usize - asientos_recomendados.len()) {
-                    asientos_recomendados.push((zona.nombre.clone(), *numero_fila, silla.clone()));
-                    silla.estado = EstadoSilla::Reservada; // Actualiza el estado de la silla al encontrarla
+                for silla in asientos_disponibles.into_iter().take(cantidad_boletos as usize - asientos_recomendados.len()) {
+                    silla.estado = EstadoSilla::Reservada; // Actualiza el estado de la silla al reservarla
+                    asientos_recomendados.push(AsientoInfo {
+                        zona: zona.nombre.clone(),
+                        fila: *numero_fila,
+                        asiento: silla.numero,
+                        estado: silla.estado,
+                    });
                 }
 
                 // Si se han encontrado suficientes asientos, detener la búsqueda
@@ -131,20 +197,19 @@ impl Estadio {
         }
 
         if asientos_recomendados.len() < cantidad_boletos as usize {
-            mensaje = format!("No se encontraron suficientes asientos disponibles en la categoría: {}", categoria.nombre);
+            mensaje = format!("No se encontraron suficientes asientos disponibles en la categoría.");
         }
 
-        (asientos_recomendados, mensaje, categoria.nombre.clone())
+        (asientos_recomendados, mensaje)
     }
 
     // Función para confirmar o cancelar la compra de asientos (cambia su estado a Comprada o Disponible)
-    fn confirmar_compra_sillas(&mut self, indice_categoria: usize, asientos: &mut Vec<(String, u32, Silla)>, confirmar: bool) {
+    fn confirmar_compra_sillas(&mut self, indice_categoria: usize, asientos: &Vec<AsientoInfoCliente>, confirmar: bool) {
         let categoria = &mut self.categorias[indice_categoria];
-        for (zona_nombre, numero_fila, silla) in asientos.iter_mut() {
-            // Encontrar la silla en la estructura del estadio
-            if let Some(zona) = categoria.zonas.iter_mut().find(|zona| zona.nombre == *zona_nombre) {
-                if let Some(fila) = zona.filas.get_mut(&numero_fila) {
-                    if let Some(silla_actual) = fila.iter_mut().find(|s| s.numero == silla.numero) {
+        for asiento_info in asientos {
+            if let Some(zona) = categoria.zonas.iter_mut().find(|zona| zona.nombre == asiento_info.zona) {
+                if let Some(fila) = zona.filas.get_mut(&asiento_info.fila) {
+                    if let Some(silla_actual) = fila.iter_mut().find(|s| s.numero == asiento_info.asiento) {
                         silla_actual.estado = if confirmar {
                             EstadoSilla::Comprada
                         } else {
@@ -157,42 +222,15 @@ impl Estadio {
     }
 }
 
-//-------------------Estructura para datos del cliente
-#[derive(Debug)]
-struct Solicitud {
-    indice_categoria: usize,
-    cantidad_boletos: u32,
-    confirmar_compra: bool,
-}
-
 //----------------------Función para deserializar y validar la solicitud
 fn deserializar_solicitud(datos: &str) -> Result<Solicitud, String> {
-    let partes: Vec<&str> = datos.trim().split(',').collect();
-
-    if partes.len() != 3 {
-        return Err("Formato de solicitud incorrecto".to_string());
-    }
-
-    let indice_categoria = partes[0].parse::<usize>().map_err(|_| "Índice de categoría inválido".to_string())?;
-    let cantidad_boletos = partes[1].parse::<u32>().map_err(|_| "Cantidad de boletos inválida".to_string())?;
-
-    let confirmar_compra = match partes[2].trim().to_lowercase().as_str() {
-        "true" => true,
-        "false" => false,
-        _ => return Err("Valor de confirmación inválido".to_string()),
-    };
-
-    Ok(Solicitud {
-        indice_categoria,
-        cantidad_boletos,
-        confirmar_compra,
-    })
+    serde_json::from_str(datos).map_err(|e| e.to_string())
 }
 
 // Función para manejar al cliente
 async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
-    // Crear un buffer de 1024 bytes para leer los datos del stream (la conexión del cliente).
-    let mut buffer = [0; 1024];
+    // Leer los datos del cliente
+    let mut buffer = [0; 65536];
     let bytes_leidos = match stream.read(&mut buffer).await {
         Ok(n) => n,
         Err(e) => {
@@ -205,8 +243,14 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
     let solicitud = match deserializar_solicitud(&datos) {
         Ok(s) => s,
         Err(e) => {
-            let respuesta = format!("Error al deserializar solicitud: {}", e);
-            if let Err(e) = stream.write_all(respuesta.as_bytes()).await {
+            let respuesta = RespuestaServidor {
+                categoria: "".to_string(),
+                mensaje: format!("Error al deserializar solicitud: {}", e),
+                asientos_categoria: Vec::new(),
+                asientos_recomendados: Vec::new(),
+            };
+            let respuesta_json = serde_json::to_string(&respuesta).unwrap();
+            if let Err(e) = stream.write_all(respuesta_json.as_bytes()).await {
                 eprintln!("Error al escribir al stream: {:?}", e);
             }
             return;
@@ -217,42 +261,51 @@ async fn manejar_cliente(mut stream: TcpStream, estadio: Arc<Mutex<Estadio>>) {
         indice_categoria,
         cantidad_boletos,
         confirmar_compra,
+        asientos_recomendados,
     } = solicitud;
 
     // Bloquear el estadio para modificarlo
     let mut estadio = estadio.lock().await;
 
-    // Buscar los mejores asientos disponibles, limite de 10 tickets
-    let (mut asientos_recomendados, mensaje, nombre_categoria) = estadio.buscar_asientos(indice_categoria, cantidad_boletos, 10);
+    // Obtener todos los asientos de la categoría seleccionada
+    let (asientos_categoria, nombre_categoria) = estadio.obtener_asientos_categoria(indice_categoria);
 
-    // Crear mensaje de respuesta para el cliente
-    let mut respuesta = format!("Categoría elegida: {}\n", nombre_categoria);
-    respuesta.push_str(&format!("{}\n", mensaje));
+    let mut respuesta = RespuestaServidor {
+        categoria: nombre_categoria.clone(),
+        mensaje: "".to_string(),
+        asientos_categoria: asientos_categoria.clone(),
+        asientos_recomendados: Vec::new(),
+    };
 
-    if !asientos_recomendados.is_empty() {
-        respuesta.push_str("Asientos recomendados:\n");
-        for (zona_nombre, numero_fila, silla) in &asientos_recomendados {
-            respuesta.push_str(&format!("Zona: {}, Fila: {}, Asiento: {}\n", zona_nombre, numero_fila, silla.numero));
-        }
-
-        // Confirmar o cancelar la compra
-        if confirmar_compra {
-            // Cambiar el estado de las sillas a Comprada
-            estadio.confirmar_compra_sillas(indice_categoria, &mut asientos_recomendados, true);
-            respuesta.push_str("\nCompra realizada.");
+    if !confirmar_compra && asientos_recomendados.is_none() {
+        // Primera solicitud: Buscar asientos y marcarlos como reservados
+        let (asientos_recomendados, mensaje_busqueda) = estadio.buscar_asientos(indice_categoria, cantidad_boletos, 10);
+        respuesta.asientos_recomendados = asientos_recomendados.clone();
+        respuesta.mensaje = mensaje_busqueda;
+    } else {
+        // Segunda solicitud: Confirmar o cancelar compra
+        if let Some(asientos) = asientos_recomendados {
+            estadio.confirmar_compra_sillas(indice_categoria, &asientos, confirmar_compra);
+            respuesta.mensaje = if confirmar_compra {
+                "Compra realizada.".to_string()
+            } else {
+                "Compra cancelada. Asientos liberados.".to_string()
+            };
         } else {
-            // Cambiar el estado de las sillas a Disponible (cancelación)
-            estadio.confirmar_compra_sillas(indice_categoria, &mut asientos_recomendados, false);
-            respuesta.push_str("\nReserva cancelada, asientos puestos de nuevo disponibles.");
+            respuesta.mensaje = "No se proporcionaron asientos para confirmar o cancelar.".to_string();
         }
-    } 
+    }
 
-    // Enviar la respuesta al cliente
-    if let Err(e) = stream.write_all(respuesta.as_bytes()).await {
+    // Actualizar la lista de asientos después de las operaciones
+    let (asientos_actualizados, _) = estadio.obtener_asientos_categoria(indice_categoria);
+    respuesta.asientos_categoria = asientos_actualizados;
+
+    // Serializar y enviar la respuesta al cliente
+    let respuesta_json = serde_json::to_string(&respuesta).unwrap();
+    if let Err(e) = stream.write_all(respuesta_json.as_bytes()).await {
         eprintln!("Error al escribir al stream: {:?}", e);
     }
 }
-
 
 //-----------------MAIN PRINCIPAL
 #[tokio::main]
