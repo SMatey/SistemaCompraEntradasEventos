@@ -4,20 +4,20 @@ import sys
 import socket
 import threading
 import json
+import importlib
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton,
     QComboBox, QSpinBox, QVBoxLayout, QHBoxLayout,
     QWidget, QGridLayout, QMessageBox, QScrollArea
 )
-from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QObject
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 
-# Clase Asiento
+# Clase Asiento permanece igual
 class Asiento(QPushButton):
     def __init__(self, asiento_info):
         super().__init__(str(asiento_info['asiento']))
         self.asiento_info = asiento_info
         self.estado = asiento_info['estado']
-        print(f"Creando Asiento: Zona {asiento_info['zona']}, Fila {asiento_info['fila']}, Asiento {asiento_info['asiento']}, Estado {self.estado}")
         self.setCheckable(True)
         self.actualizar_color()
         self.clicked.connect(self.cambiar_seleccion)
@@ -42,7 +42,7 @@ class Asiento(QPushButton):
             self.setStyleSheet('background-color: gray')
             self.estado = 'Disponible'
 
-# Clase VentanaAsientos
+# Clase VentanaAsientos permanece igual
 class VentanaAsientos(QWidget):
     actualizar_interfaz_signal = pyqtSignal()
 
@@ -55,12 +55,7 @@ class VentanaAsientos(QWidget):
         self.asientos_categoria = []
         self.asientos_recomendados = []
         self.botones_asientos = {}
-        print(f"Datos de respuesta recibidos: {datos_respuesta}")
-        try:
-            self.init_ui()
-            print("VentanaAsientos inicializada correctamente.")
-        except Exception as e:
-            print("Excepción en VentanaAsientos.__init__:", e)
+        self.init_ui()
 
     def init_ui(self):
         v_layout = QVBoxLayout()
@@ -70,6 +65,30 @@ class VentanaAsientos(QWidget):
 
         label_info = QLabel(f"Categoría: {categoria}\n{mensaje}")
         v_layout.addWidget(label_info)
+
+        # Leyenda de colores
+        leyenda_layout = QHBoxLayout()
+        leyendas = [
+            ('Disponible', 'gray'),
+            ('Reservada', 'yellow'),
+            ('Comprada', 'red'),
+            ('Recomendado', 'blue')
+        ]
+        for texto, color in leyendas:
+            label_color = QLabel()
+            label_color.setFixedSize(20, 20)
+            label_color.setStyleSheet(f'background-color: {color}')
+            leyenda_layout.addWidget(label_color)
+            leyenda_layout.addWidget(QLabel(texto))
+        v_layout.addLayout(leyenda_layout)
+
+        # Selección del método de pago
+        metodo_pago_layout = QHBoxLayout()
+        metodo_pago_layout.addWidget(QLabel('Método de Pago:'))
+        self.combo_metodo_pago = QComboBox()
+        self.combo_metodo_pago.addItems(['Tarjeta', 'PayPal', 'Criptomonedas'])
+        metodo_pago_layout.addWidget(self.combo_metodo_pago)
+        v_layout.addLayout(metodo_pago_layout)
 
         # Área de scroll para los asientos
         scroll_area = QScrollArea()
@@ -81,11 +100,11 @@ class VentanaAsientos(QWidget):
         v_layout.addWidget(scroll_area)
 
         h_layout_botones = QHBoxLayout()
-        self.btn_confirmar = QPushButton('Confirmar Compra')
-        self.btn_confirmar.clicked.connect(self.confirmar_compra)
+        self.btn_realizar_compra = QPushButton('Realizar Compra')
+        self.btn_realizar_compra.clicked.connect(self.realizar_compra)
         self.btn_cancelar = QPushButton('Cancelar Compra')
         self.btn_cancelar.clicked.connect(self.cancelar_compra)
-        h_layout_botones.addWidget(self.btn_confirmar)
+        h_layout_botones.addWidget(self.btn_realizar_compra)
         h_layout_botones.addWidget(self.btn_cancelar)
         v_layout.addLayout(h_layout_botones)
 
@@ -98,13 +117,10 @@ class VentanaAsientos(QWidget):
         self.temporizador_reserva.start()
 
     def mostrar_asientos(self):
-        print("Mostrando asientos en VentanaAsientos...")
         try:
             self.botones_asientos = {}
             self.asientos_categoria = self.datos_respuesta['asientos_categoria']
             self.asientos_recomendados = self.datos_respuesta['asientos_recomendados']
-            print(f"Cantidad de asientos en la categoría: {len(self.asientos_categoria)}")
-            print(f"Asientos recomendados: {self.asientos_recomendados}")
 
             # Crear un conjunto de claves de asientos recomendados para identificarlos
             asientos_recomendados_set = {(a['zona'], a['fila'], a['asiento']) for a in self.asientos_recomendados}
@@ -118,7 +134,6 @@ class VentanaAsientos(QWidget):
             # Actualizar el estado de los asientos recomendados a 'Recomendado'
             for clave_asiento in asientos_recomendados_set:
                 if clave_asiento in asientos_dict:
-                    # Hacer una copia del asiento_info para no modificar el original
                     asiento_info = asientos_dict[clave_asiento].copy()
                     asiento_info['estado'] = 'Recomendado'
                     asientos_dict[clave_asiento] = asiento_info
@@ -170,8 +185,7 @@ class VentanaAsientos(QWidget):
         except Exception as e:
             print("Excepción en mostrar_asientos:", e)
 
-    def confirmar_compra(self):
-        self.temporizador_reserva.stop()
+    def realizar_compra(self):
         asientos_seleccionados = []
         for asiento in self.botones_asientos.values():
             if asiento.estado == 'Recomendado':
@@ -179,7 +193,6 @@ class VentanaAsientos(QWidget):
                     'zona': asiento.asiento_info['zona'],
                     'fila': asiento.asiento_info['fila'],
                     'asiento': asiento.asiento_info['asiento'],
-                    # No enviamos 'estado' al servidor
                 }
                 asientos_seleccionados.append(asiento_info)
 
@@ -187,17 +200,51 @@ class VentanaAsientos(QWidget):
             QMessageBox.warning(self, 'Advertencia', 'No ha seleccionado ningún asiento para comprar.')
             return
 
-        solicitud = {
-            'indice_categoria': self.solicitud['indice_categoria'],
-            'cantidad_boletos': len(asientos_seleccionados),
-            'confirmar_compra': True,
-            'asientos_recomendados': asientos_seleccionados
-        }
-        threading.Thread(target=self.enviar_solicitud, args=(solicitud, True)).start()
+        # Obtener el método de pago seleccionado
+        metodo_pago = self.combo_metodo_pago.currentText()
+        plugin_name = ''
+        if metodo_pago == 'Tarjeta':
+            plugin_name = 'plugin_pago_tarjeta'
+        elif metodo_pago == 'PayPal':
+            plugin_name = 'plugin_pago_paypal'
+        elif metodo_pago == 'Criptomonedas':
+            plugin_name = 'plugin_pago_criptomonedas'
+        else:
+            QMessageBox.warning(self, 'Error', 'Método de pago no soportado.')
+            return
 
-        # Deshabilitar botones
-        self.btn_confirmar.setEnabled(False)
-        self.btn_cancelar.setEnabled(False)
+        # Iniciar proceso de pago
+        resultado_pago = self.procesar_pago(plugin_name)
+        if resultado_pago is None:
+            # El usuario canceló el pago
+            QMessageBox.information(self, 'Pago Cancelado', 'El pago ha sido cancelado.')
+            return
+        elif resultado_pago:
+            # Pago aprobado, confirmar compra
+            self.temporizador_reserva.stop()
+            solicitud = {
+                'indice_categoria': self.solicitud['indice_categoria'],
+                'cantidad_boletos': len(asientos_seleccionados),
+                'confirmar_compra': True,
+                'asientos_recomendados': asientos_seleccionados
+            }
+            threading.Thread(target=self.enviar_solicitud, args=(solicitud, True)).start()
+            # Deshabilitar botones
+            self.btn_realizar_compra.setEnabled(False)
+            self.btn_cancelar.setEnabled(False)
+        else:
+            # Pago rechazado
+            QMessageBox.warning(self, 'Pago Rechazado', 'El pago no fue aprobado. Intente nuevamente.')
+
+    def procesar_pago(self, plugin_name):
+        try:
+            plugin = importlib.import_module(plugin_name)
+            resultado_pago = plugin.procesar_pago()
+            return resultado_pago
+        except Exception as e:
+            print(f"Error al cargar el plugin {plugin_name}: {e}")
+            QMessageBox.critical(self, 'Error', f'Error al procesar el pago: {e}')
+            return False
 
     def cancelar_compra(self):
         self.temporizador_reserva.stop()
@@ -208,7 +255,6 @@ class VentanaAsientos(QWidget):
                     'zona': asiento.asiento_info['zona'],
                     'fila': asiento.asiento_info['fila'],
                     'asiento': asiento.asiento_info['asiento'],
-                    # No enviamos 'estado' al servidor
                 }
                 asientos_seleccionados.append(asiento_info)
 
@@ -221,7 +267,7 @@ class VentanaAsientos(QWidget):
         threading.Thread(target=self.enviar_solicitud, args=(solicitud, True)).start()
 
         # Deshabilitar botones
-        self.btn_confirmar.setEnabled(False)
+        self.btn_realizar_compra.setEnabled(False)
         self.btn_cancelar.setEnabled(False)
 
     def cancelar_compra_por_tiempo(self):
@@ -235,7 +281,6 @@ class VentanaAsientos(QWidget):
                 s.connect(('127.0.0.1', 7878))
                 s.sendall(json.dumps(solicitud).encode())
                 respuesta = s.recv(65536).decode()
-                print("Respuesta del servidor (confirmar/cancelar):", respuesta)
                 self.respuesta = respuesta
                 self.es_confirmacion = es_confirmacion
                 self.actualizar_interfaz_signal.emit()
@@ -243,7 +288,6 @@ class VentanaAsientos(QWidget):
             QMessageBox.critical(self, 'Error', f'Error de conexión: {e}')
 
     def actualizar_interfaz(self):
-        print("actualizar_interfaz called (VentanaAsientos)")
         try:
             datos = json.loads(self.respuesta)
             mensaje = datos['mensaje']
@@ -258,13 +302,16 @@ class VentanaAsientos(QWidget):
 
 # Clase principal del cliente
 class Cliente(QMainWindow):
-    actualizar_interfaz_signal = pyqtSignal()
+    actualizar_interfaz_signal = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Sistema de Compra de Entradas')
         self.actualizar_interfaz_signal.connect(self.actualizar_interfaz)
         self.init_ui()
+        self.responses = {}
+        self.responses_lock = threading.Lock()
+        self.ventanas_asientos = {}
 
     def init_ui(self):
         # Componentes de la interfaz
@@ -281,6 +328,12 @@ class Cliente(QMainWindow):
 
         self.label_respuesta = QLabel('')
 
+        # Representación del estadio
+        self.btn_cargar_estadio = QPushButton('Mostrar Representación del Estadio')
+        self.btn_cargar_estadio.clicked.connect(self.cargar_estadio)
+        self.estadio_widget = QWidget()
+        self.estadio_layout = QGridLayout(self.estadio_widget)
+
         # Layouts
         h_layout = QHBoxLayout()
         h_layout.addWidget(QLabel('Categoría:'))
@@ -291,11 +344,58 @@ class Cliente(QMainWindow):
 
         v_layout = QVBoxLayout()
         v_layout.addLayout(h_layout)
+        v_layout.addWidget(self.btn_cargar_estadio)
+        v_layout.addWidget(self.estadio_widget)
         v_layout.addWidget(self.label_respuesta)
 
         central_widget = QWidget()
         central_widget.setLayout(v_layout)
         self.setCentralWidget(central_widget)
+
+    def cargar_estadio(self):
+        # (El código de esta función permanece igual)
+        # ...
+
+        # Limpiar el layout anterior
+        for i in reversed(range(self.estadio_layout.count())):
+            widget_to_remove = self.estadio_layout.itemAt(i).widget()
+            self.estadio_layout.removeWidget(widget_to_remove)
+            widget_to_remove.setParent(None)
+
+        # Crear la representación simplificada del estadio
+        # Usando una cuadrícula de 3x3 para posicionar las categorías
+        # Las posiciones son relativas y representativas
+
+        # Mapa de posiciones: {(fila, columna): ('Nombre de la categoría', 'Color')}
+        mapa_estadio = {
+            (0, 1): ('General Norte', '#ADD8E6'),   # Azul Claro
+            (1, 0): ('Platea Oeste', '#C0C0C0'),    # Plata
+            (1, 1): ('Campo de Juego', '#008000'),  # Verde
+            (1, 2): ('Platea Este', '#FFD700'),     # Oro
+            (2, 1): ('General Sur', '#CD7F32'),     # Bronce
+        }
+
+        for posicion, (nombre_categoria, color_categoria) in mapa_estadio.items():
+            fila, columna = posicion
+            if nombre_categoria == 'Campo de Juego':
+                label = QLabel(nombre_categoria)
+                label.setAlignment(Qt.AlignCenter)
+                label.setStyleSheet(f'background-color: {color_categoria}; border: 1px solid black;')
+                self.estadio_layout.addWidget(label, fila, columna)
+            else:
+                boton_categoria = QPushButton(nombre_categoria)
+                boton_categoria.setFixedSize(100, 50)
+                boton_categoria.setStyleSheet(f'background-color: {color_categoria}; border: 1px solid black;')
+                boton_categoria.setEnabled(False)
+                self.estadio_layout.addWidget(boton_categoria, fila, columna)
+
+        # Ajustar estiramientos para centrar el contenido
+        self.estadio_layout.setRowStretch(0, 1)
+        self.estadio_layout.setRowStretch(1, 1)
+        self.estadio_layout.setRowStretch(2, 1)
+        self.estadio_layout.setColumnStretch(0, 1)
+        self.estadio_layout.setColumnStretch(1, 1)
+        self.estadio_layout.setColumnStretch(2, 1)
 
     def buscar_asientos(self):
         indice_categoria = self.combo_categoria.currentIndex()
@@ -307,27 +407,34 @@ class Cliente(QMainWindow):
             'confirmar_compra': False,
             'asientos_recomendados': None
         }
-        threading.Thread(target=self.enviar_solicitud, args=(solicitud,)).start()
 
-    def enviar_solicitud(self, solicitud):
+        # Enviar 3 solicitudes idénticas al servidor de forma concurrente
+        for i in range(3):
+            threading.Thread(target=self.enviar_solicitud, args=(solicitud.copy(), i)).start()
+
+    def enviar_solicitud(self, solicitud, identifier):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect(('127.0.0.1', 7878))
                 s.sendall(json.dumps(solicitud).encode())
                 respuesta = s.recv(65536).decode()
-                print("Respuesta del servidor:", respuesta)
-                self.respuesta = respuesta
-                self.solicitud = solicitud
-                self.actualizar_interfaz_signal.emit()
+                # Guardar la respuesta con el identificador
+                with self.responses_lock:
+                    self.responses[identifier] = (respuesta, solicitud)
+                # Emitir señal para actualizar la interfaz
+                self.actualizar_interfaz_signal.emit(identifier)
         except Exception as e:
+            # Comunicamos el error a la interfaz principal
             self.label_respuesta.setText(f'Error de conexión: {e}')
 
-    def actualizar_interfaz(self):
-        print("actualizar_interfaz called (Cliente)")
+    def actualizar_interfaz(self, identifier):
         try:
-            print("Procesando respuesta en Cliente...")
-            datos = json.loads(self.respuesta)
-            print("Datos recibidos:", datos)
+            with self.responses_lock:
+                data = self.responses.pop(identifier, None)
+            if data is None:
+                return
+            respuesta, solicitud = data
+            datos = json.loads(respuesta)
             categoria = datos['categoria']
             mensaje = datos['mensaje']
             asientos_categoria = datos['asientos_categoria']
@@ -335,16 +442,15 @@ class Cliente(QMainWindow):
 
             if asientos_categoria:
                 # Abrir la ventana de asientos
-                print("Abriendo ventana de asientos...")
-                self.ventana_asientos = VentanaAsientos(datos, self.solicitud)
-                self.ventana_asientos.show()
+                ventana_asientos = VentanaAsientos(datos, solicitud)
+                ventana_asientos.show()
+                # Guardar la referencia a la ventana para evitar que sea recolectada por el recolector de basura
+                self.ventanas_asientos[identifier] = ventana_asientos
             else:
                 self.label_respuesta.setText('No hay asientos disponibles en esta categoría.')
         except json.JSONDecodeError:
-            print("Error al decodificar JSON")
             self.label_respuesta.setText('Error al procesar la respuesta del servidor.')
         except Exception as e:
-            print("Excepción en actualizar_interfaz (Cliente):", e)
             self.label_respuesta.setText(f'Error al procesar la respuesta: {e}')
 
 if __name__ == '__main__':

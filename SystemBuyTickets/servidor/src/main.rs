@@ -96,19 +96,19 @@ async fn inicializar_mapeo() -> Estadio {
             // Agregar filas y sillas a cada zona
             let fila_1: Vec<Silla> = (1..=10).map(|num| Silla {
                 numero: num,
-                estado: match num % 5 {
-                    0 => EstadoSilla::Reservada,
-                    1 => EstadoSilla::Comprada,
-                    _ => EstadoSilla::Disponible,
+                estado: if num % 5 == 0 {
+                    EstadoSilla::Comprada
+                } else {
+                    EstadoSilla::Disponible
                 },
             }).collect();
             
             let fila_2: Vec<Silla> = (11..=20).map(|num| Silla {
                 numero: num,
-                estado: match num % 6 {
-                    0 => EstadoSilla::Comprada,
-                    1 => EstadoSilla::Reservada,
-                    _ => EstadoSilla::Disponible,
+                estado: if num % 6 == 0 {
+                    EstadoSilla::Comprada
+                } else {
+                    EstadoSilla::Disponible
                 },
             }).collect();
             
@@ -164,40 +164,83 @@ impl Estadio {
 
         let categoria = &mut self.categorias[indice_categoria];
         let mut asientos_recomendados = Vec::new();
-        let mut mensaje = String::from("");
+        // Eliminamos la asignación inicial de 'mensaje'
+        let mensaje: String;
 
-        // Itera sobre las zonas y filas de la categoría seleccionada
-        for zona in &mut categoria.zonas {
+        // Iterar sobre las zonas y filas para encontrar secuencias de asientos contiguos
+        'busqueda: for zona in &mut categoria.zonas {
             for (numero_fila, asientos) in &mut zona.filas {
-                let asientos_disponibles: Vec<&mut Silla> = asientos.iter_mut()
-                    .filter(|silla| silla.estado == EstadoSilla::Disponible)
-                    .collect();
+                // Ordenar los asientos por número
+                let mut asientos_ordenados = asientos.iter_mut().collect::<Vec<_>>();
+                asientos_ordenados.sort_by_key(|s| s.numero);
 
-                // Añadir asientos hasta completar la cantidad solicitada
-                for silla in asientos_disponibles.into_iter().take(cantidad_boletos as usize - asientos_recomendados.len()) {
-                    silla.estado = EstadoSilla::Reservada; // Actualiza el estado de la silla al reservarla
-                    asientos_recomendados.push(AsientoInfo {
-                        zona: zona.nombre.clone(),
-                        fila: *numero_fila,
-                        asiento: silla.numero,
-                        estado: silla.estado,
-                    });
+                let mut contador = 0;
+                let mut temp_asientos = Vec::new();
+
+                for silla in asientos_ordenados {
+                    if silla.estado == EstadoSilla::Disponible {
+                        contador += 1;
+                        temp_asientos.push(silla);
+                        if contador == cantidad_boletos {
+                            // Se encontró una secuencia de asientos contiguos
+                            for silla_reservada in &mut temp_asientos {
+                                silla_reservada.estado = EstadoSilla::Reservada;
+                                asientos_recomendados.push(AsientoInfo {
+                                    zona: zona.nombre.clone(),
+                                    fila: *numero_fila,
+                                    asiento: silla_reservada.numero,
+                                    estado: silla_reservada.estado,
+                                });
+                            }
+                            break 'busqueda;
+                        }
+                    } else {
+                        // Reiniciar si se encuentra un asiento no disponible
+                        contador = 0;
+                        temp_asientos.clear();
+                    }
                 }
+            }
+        }
 
-                // Si se han encontrado suficientes asientos, detener la búsqueda
+        if asientos_recomendados.len() < cantidad_boletos as usize {
+            // Si no se encontraron asientos contiguos, buscar asientos lo más cercanos posible
+            asientos_recomendados.clear();
+
+            // Segunda pasada: asignar asientos disponibles, aunque no sean contiguos
+            for zona in &mut categoria.zonas {
+                for (numero_fila, asientos) in &mut zona.filas {
+                    for silla in asientos.iter_mut() {
+                        if silla.estado == EstadoSilla::Disponible {
+                            silla.estado = EstadoSilla::Reservada;
+                            asientos_recomendados.push(AsientoInfo {
+                                zona: zona.nombre.clone(),
+                                fila: *numero_fila,
+                                asiento: silla.numero,
+                                estado: silla.estado,
+                            });
+
+                            if asientos_recomendados.len() == cantidad_boletos as usize {
+                                break;
+                            }
+                        }
+                    }
+                    if asientos_recomendados.len() == cantidad_boletos as usize {
+                        break;
+                    }
+                }
                 if asientos_recomendados.len() == cantidad_boletos as usize {
                     break;
                 }
             }
 
-            // Si se han encontrado suficientes asientos, detener la búsqueda
-            if asientos_recomendados.len() == cantidad_boletos as usize {
-                break;
+            if asientos_recomendados.len() < cantidad_boletos as usize {
+                mensaje = format!("No se encontraron suficientes asientos disponibles en la categoría.");
+            } else {
+                mensaje = format!("No se encontraron asientos contiguos. Se asignaron asientos cercanos.");
             }
-        }
-
-        if asientos_recomendados.len() < cantidad_boletos as usize {
-            mensaje = format!("No se encontraron suficientes asientos disponibles en la categoría.");
+        } else {
+            mensaje = format!("Asientos contiguos asignados.");
         }
 
         (asientos_recomendados, mensaje)
